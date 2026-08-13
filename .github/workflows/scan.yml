@@ -1,1 +1,63 @@
+name: EMA scan
 
+on:
+  # 21:30 UTC จันทร์-ศุกร์ ≈ 1 ชม.หลังตลาดสหรัฐปิด (ประมาณ 04:30 เช้าเวลาไทย)
+  schedule:
+    - cron: "30 21 * * 1-5"
+  # กดรันเองได้จากแท็บ Actions
+  workflow_dispatch:
+    inputs:
+      period:
+        description: "ช่วงข้อมูลย้อนหลัง (ต้องมากพอสำหรับ EMA200)"
+        default: "3y"
+      interval:
+        description: "ไทม์เฟรม: 1d = รายวัน, 1wk = รายสัปดาห์ (ถ้าใช้ 1wk ให้เปลี่ยน period เป็น 10y)"
+        default: "1d"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ema-scan
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: เช็กเอาต์โค้ด
+        uses: actions/checkout@v4
+
+      - name: ติดตั้ง Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: ติดตั้งไลบรารี
+        run: pip install pandas numpy yfinance
+
+      - name: คำนวณข้อมูล
+        env:
+          PERIOD: ${{ inputs.period || '3y' }}
+          INTERVAL: ${{ inputs.interval || '1d' }}
+        run: python screener.py --period "$PERIOD" --interval "$INTERVAL"
+
+      - name: อัปเดตเว็บไซต์
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f docs/data.js docs/data.json
+          if git diff --quiet --cached; then
+            echo "ข้อมูลไม่เปลี่ยน"
+          else
+            git commit -m "ข้อมูล ณ $(date -u '+%Y-%m-%d %H:%M UTC')"
+            git push
+          fi
+
+      - name: เก็บไฟล์ข้อมูลไว้ดาวน์โหลด
+        uses: actions/upload-artifact@v4
+        with:
+          name: data-${{ github.run_number }}
+          path: |
+            docs/data.js
+            docs/data.json
+          retention-days: 14
